@@ -33,8 +33,18 @@ from custom_components.visionect.const import (
     DOMAIN,
 )
 
-from pyvisionect.devices.enums import PacketType
-from pyvisionect.packets import ControlPacket, StatusPacket, decode_payload
+from pyvisionect.devices.enums import FileOperation, PacketType
+from pyvisionect.packets import (
+    ControlPacket,
+    FilePacket,
+    StatusPacket,
+    decode_payload,
+)
+from pyvisionect.packets.file import (
+    DEVICE_FILE_READ_CHUNK,
+    FILE_LIST_PATH,
+    FileOpen,
+)
 from pyvisionect.wire import Compression, DataHeader, Direction, FrameDecoder
 from pyvisionect.wire import encode_frame as wire_encode_frame
 
@@ -283,6 +293,89 @@ class FakeSign:
                     compression=Compression.NONE,
                 )
         raise AssertionError("the capture holds no status frame")
+
+    # ------------------------------------------------------- the filesystem
+
+    def file_frame(self, payload: bytes) -> bytes:
+        """A device -> server ``file`` packet carrying *payload*."""
+        body = FilePacket(op=FileOperation.READ, raw=payload).encode()
+        return wire_encode_frame(
+            DataHeader(
+                device_id=self.device_id,
+                type=int(PacketType.FILE),
+                id=0,
+                length=len(body),
+            ),
+            body,
+            direction=Direction.DEVICE_TO_SERVER,
+            compression=Compression.NONE,
+        )
+
+    @staticmethod
+    def listing_blob(files: dict[str, bytes]) -> bytes:
+        """The ASCII directory blob a read of ``"."`` returns.
+
+        ``name checksum size`` per line. The checksum column reads ``0`` for
+        every file on this firmware, so it identifies nothing -- reproduced
+        here as it is rather than as it ought to be.
+        """
+        return "".join(
+            f"{name} 0 {len(data)}\n" for name, data in files.items()
+        ).encode("ascii")
+
+    async def serve_files(
+        self, hass: HomeAssistant, files: dict[str, bytes]
+    ) -> asyncio.Task:
+        """Answer the device-file conversation in the background.
+
+        The sign's filesystem has no list opcode -- a listing is a read of
+        ``"."`` -- and no seek, so the whole protocol is open / read* / close
+        with the cursor implied. That is small enough to answer honestly, which
+        is better than mocking ``read_device_file`` and testing nothing.
+
+        Returns the task; cancel it when done.
+        """
+        cursor = {"name": "", "offset": 0}
+
+        async def loop() -> None:
+            while True:
+                for frame in await self.read_frames(timeout=0.05):
+                    packet = decode_payload(frame.data.type, frame.payload)
+                    if not isinstance(packet, FilePacket):
+                        await self.send_raw(self.control_frame(frame.data.id))
+                        continue
+                    if packet.op == FileOperation.OPEN:
+                        name = FileOpen.decode(packet.raw).filename
+                        if name == FILE_LIST_PATH or name in files:
+                            cursor.update(name=name, offset=0)
+                            await self.send_raw(self.control_frame(frame.data.id))
+                        else:
+                            await self.send_raw(
+                                self.control_frame(
+                                    frame.data.id, ack=False, error_code=0x008A0000
+                                )
+                            )
+                    elif packet.op == FileOperation.READ:
+                        want = int.from_bytes(packet.raw[:4], "little")
+                        blob = (
+                            self.listing_blob(files)
+                            if cursor["name"] == FILE_LIST_PATH
+                            else files[str(cursor["name"])]
+                        )
+                        start = int(cursor["offset"])
+                        # The device truncates anything over its chunk size.
+                        end = start + min(want, DEVICE_FILE_READ_CHUNK)
+                        chunk = blob[start:end]
+                        cursor["offset"] = start + len(chunk)
+                        await self.send_raw(self.control_frame(frame.data.id))
+                        await self.send_raw(self.file_frame(chunk))
+                    else:
+                        await self.send_raw(self.control_frame(frame.data.id))
+                await asyncio.sleep(0)
+
+        task = asyncio.get_running_loop().create_task(loop())
+        await asyncio.sleep(0)
+        return task
 
     def sent_of_type(self, kind: type) -> list[Any]:
         """Everything of one packet type the listener has sent us."""
