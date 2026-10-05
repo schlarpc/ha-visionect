@@ -326,6 +326,7 @@ class VisionectRuntime:
         self._no_device_unsub: Any = None
         self._overdue_unsub: Any = None
         self._overdue: dict[str, bool] = {}
+        self._socket_open: dict[str, bool] = {}
         self._forgotten: set[str] = set()
         self._applied_options: dict[str, Any] = dict(entry.options)
         self.advertised_address = f"{self.host}:{self.port}"
@@ -519,6 +520,14 @@ class VisionectRuntime:
         for uuid in self.known_uuids():
             if not self.has_ever_seen(uuid):
                 continue
+            # The library emits no event when a socket simply goes away, so
+            # nothing else would ever correct binary_sensor.connected -- and
+            # for a sign on an hourly heartbeat "nothing else" means an hour
+            # of claiming a connection that closed.
+            open_now = self.socket_open(uuid)
+            if self._socket_open.get(uuid) != open_now:
+                self._socket_open[uuid] = open_now
+                changed = True
             # The sync verdict can change with nothing but the clock: a sign
             # that stops calling altogether never produces the contact that
             # would otherwise settle it. Without this tick the problem sensor
@@ -1718,6 +1727,7 @@ class VisionectRuntime:
         self.device_files.pop(uuid, None)
         self.device_file_meta.pop(uuid, None)
         self._sync_status.pop(uuid, None)
+        self._socket_open.pop(uuid, None)
         for packet_id, inflight in list(self._inflight_frame.items()):
             if inflight.uuid == uuid:
                 self._inflight_frame.pop(packet_id, None)

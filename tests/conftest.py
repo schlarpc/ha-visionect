@@ -34,7 +34,7 @@ from custom_components.visionect.const import (
 )
 
 from pyvisionect.devices.enums import PacketType
-from pyvisionect.packets import ControlPacket, decode_payload
+from pyvisionect.packets import ControlPacket, StatusPacket, decode_payload
 from pyvisionect.wire import Compression, DataHeader, Direction, FrameDecoder
 from pyvisionect.wire import encode_frame as wire_encode_frame
 
@@ -113,6 +113,7 @@ class FakeSign:
         self._writer: asyncio.StreamWriter | None = None
         self._decoder = FrameDecoder(Direction.SERVER_TO_DEVICE)
         self.received = bytearray()
+        self.uuid = DEVICE_UUID
         self.device_id = bytes.fromhex(DEVICE_UUID.replace("-", ""))
         self.acked: list[int] = []
         self.nacked: list[int] = []
@@ -237,9 +238,70 @@ class FakeSign:
         (self.acked if ack else self.nacked).extend(answered)
         return answered
 
+    def status_frame(
+        self,
+        *,
+        drop: set[int] | None = None,
+        set_tags: dict[int, int] | None = None,
+    ) -> bytes:
+        """A captured status frame with records removed or overwritten.
+
+        Two things need this. Proving that an *absent* field creates no entity
+        needs a packet that is missing one, and proving the sync verdict needs
+        a packet whose ``DisplayStateCRC`` is a value the test chose. Rather
+        than inventing a packet, this takes the captured one apart and
+        re-encodes it -- ``StatusPacket.encode`` is the exact inverse of
+        ``decode`` for every captured frame, so what goes on the wire is the
+        real thing with the named tags changed and nothing else.
+        """
+        drop = drop or set()
+        set_tags = set_tags or {}
+        for raw in self._frames:
+            for frame in FrameDecoder(Direction.DEVICE_TO_SERVER).feed(raw):
+                packet = decode_payload(frame.data.type, frame.payload)
+                if not isinstance(packet, StatusPacket):
+                    continue
+                kept = [
+                    (t, set_tags.get(t, v))
+                    for t, v in packet.records
+                    if t not in drop
+                ]
+                payload = StatusPacket(
+                    records=kept,
+                    sentinel=packet.sentinel,
+                    trailing=packet.trailing,
+                ).encode()
+                return wire_encode_frame(
+                    DataHeader(
+                        device_id=frame.data.device_id,
+                        type=int(PacketType.STATUS),
+                        id=frame.data.id,
+                        length=len(payload),
+                    ),
+                    payload,
+                    direction=Direction.DEVICE_TO_SERVER,
+                    compression=Compression.NONE,
+                )
+        raise AssertionError("the capture holds no status frame")
+
     def sent_of_type(self, kind: type) -> list[Any]:
         """Everything of one packet type the listener has sent us."""
         return [p for p in self.sent if isinstance(p, kind)]
+
+    async def disconnect(self, hass: HomeAssistant, runtime: Any) -> None:
+        """Close the socket and wait for the listener to notice.
+
+        Closing a socket is not an event the other end sees synchronously, and
+        a test that asserts "the sign is away" immediately after ``close()``
+        is really asserting the scheduler's order.
+        """
+        await self.close()
+        for _ in range(50):
+            await asyncio.sleep(0)
+            await hass.async_block_till_done()
+            if not runtime.socket_open(self.uuid):
+                return
+        raise AssertionError("the listener never noticed the socket close")
 
     async def close(self) -> None:
         if self._writer is None:

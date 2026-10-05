@@ -7,3 +7,8 @@ pytest-homeassistant-custom-component==0.13.367
 # The protocol library.  Not on PyPI yet, so tests install it from a checkout:
 #   uv pip install -e ../pyvisionect[imaging]
 # pyvisionect[imaging]
+
+# The camera component imports PyTurboJPEG unconditionally, and this
+# integration accepts a camera.* entity as a content source, so without this
+# the camera branch of fetch_source_bytes cannot be exercised at all.
+PyTurboJPEG

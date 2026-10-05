@@ -209,6 +209,22 @@ async def test_reconfigure_rejects_a_bound_port(
     assert entry.data[CONF_PORT] != other
 
 
+async def test_reconfigure_survives_a_failed_address_lookup(
+    hass: HomeAssistant, setup_integration: MockConfigEntry
+) -> None:
+    """The detected address is prose in the form; failing to find it is not fatal."""
+    entry = setup_integration
+    with patch(
+        "homeassistant.components.network.async_get_source_ip",
+        side_effect=RuntimeError("no interfaces"),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert (
+        result["description_placeholders"]["detected_ip"] == "this host's LAN address"
+    )
+
+
 async def test_reconfigure_cannot_bind(
     hass: HomeAssistant, setup_integration: MockConfigEntry
 ) -> None:

@@ -21,7 +21,24 @@ from .runtime import uuid_to_bytes
 
 # async_redact_data matches key names exactly and is case-sensitive, and it
 # never redacts None or "" -- so an absent value still discloses absence.
-TO_REDACT = {"BSSID", "GTIN", "uuid", "headers", "url", "access_point", "serial_number"}
+#
+# It also only matches *keys*, which is the trap: a key holding a list of UUIDs
+# or a string with a URL inside it is not redacted by naming anything here. Two
+# fields had to change shape instead -- see `live_connections` and
+# `content_source` below.
+TO_REDACT = {
+    "BSSID",
+    "GTIN",
+    "uuid",
+    "headers",
+    "url",
+    "access_point",
+    "serial_number",
+    # A renderer URL routinely carries a token in its query string, and
+    # describe_source puts the whole URL in one line. The kind of source is
+    # reported separately, because that is the part support actually needs.
+    "content_source",
+}
 
 
 def _listener(entry: VisionectConfigEntry) -> dict[str, Any]:
@@ -45,8 +62,11 @@ def _listener(entry: VisionectConfigEntry) -> dict[str, Any]:
         "bytes_in": stats.bytes_in,
         "bytes_out": stats.bytes_out,
         "last_accept_at": stats.last_accept_at,
+        # Short hashes, not UUIDs: this is a list of values and
+        # async_redact_data only matches keys, so a full UUID here would
+        # bypass the redaction of every "uuid" key elsewhere.
         "live_connections": [
-            uuid for uuid in runtime.known_uuids() if runtime.socket_open(uuid)
+            uuid[:8] for uuid in runtime.known_uuids() if runtime.socket_open(uuid)
         ],
         "is_docker_env": is_docker_env(),
         "connection_config": {
@@ -97,6 +117,7 @@ def _device(entry: VisionectConfigEntry, uuid: str) -> dict[str, Any]:
         "in_sync": state.in_sync,
         "has_pushed": state.has_pushed,
         "content_source": describe_source(record.source),
+        "content_source_kind": type(record.source).__name__,
         "want_revision": record.want_revision,
         "pushed_revision": record.pushed_revision,
         "force_next": record.force_next,
