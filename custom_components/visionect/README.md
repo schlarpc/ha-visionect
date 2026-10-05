@@ -154,9 +154,42 @@ in diagnostics.
 ## Pointing your sign at Home Assistant
 
 Your sign cannot be discovered and cannot be told over the network where to
-find Home Assistant. You must set it one of two ways.
+find Home Assistant. You must set it one of three ways.
 
-### Option A — USB (always works, needs physical access)
+### Option A — the commissioning panel (easiest, needs physical access)
+
+**Visionect signs** in the sidebar. Plug the sign into the machine running your
+browser and the panel talks to the serial console for you: it proves what is on
+the other end with `uuid_get` and `fw_version_get`, shows what the sign
+currently thinks, prefills the Home Assistant address *from the address the
+listener actually bound to*, shows you the exact command sequence before it
+sends anything, streams the console while it runs, and then waits for
+`conn_state_get` to report `tcp open` so you know it worked before you unplug.
+
+It uses **Web Serial**, which means the FTDI FT232 bridge stays owned by the
+operating system's own driver — nothing to install, no driver to unbind. It also
+means the panel **only works on an HTTPS origin or a loopback one, in Chrome or
+Edge**. On plain `http://` to a LAN address, `navigator.serial` does not exist
+and nothing in Home Assistant can change that; the panel says so on its first
+screen instead of appearing to work. `http://homeassistant.local:8123` does not
+count — the exemption is for loopback IP addresses and the literal name
+`localhost`, not for a name that resolves to one. Get a secure context from
+Home Assistant Cloud, from a reverse proxy with a TLS certificate, or by opening
+`http://localhost:8123` on the Home Assistant host itself with the sign plugged
+into that machine.
+
+The panel refuses, inside the serial transport rather than in the UI, every
+command that can cost you a device: `play_music`, `sf_rdid` and `sf_rdst` (each
+takes the firmware's console down until a reboot), `fs_format`,
+`cc3100_format`, anything `*_upgrade`, `display_conf_set`, `cli_password_set`,
+`sf_unprot`, `sf_wrst`, `app_sleep`, `lms`, `24aa256_test` and the `dcm*`,
+`bsim*`, `feat_*` and `encryption_*_set` families. It also does not use
+`wifi_conf_set`, which splits its arguments on whitespace, or `reboot`, which
+blanks the glass for a minute where `cs 1` + `cs 3` takes seconds. The WiFi
+passphrase is masked out of everything it displays or records, including the
+sign's own echo of it.
+
+### Option B — USB by hand (always works, needs physical access)
 
 The sign's micro-USB port is a serial console at 115200 8N1 (`/dev/ttyUSB0` on
 Linux, `/dev/cu.usbserial-*` on macOS):
@@ -168,7 +201,12 @@ flash_save
 
 and then make the sign open a **new** connection. See the warning below.
 
-### Option B — DNS (no physical access)
+**The line terminator is a bare CR.** LF does not submit: the device echoes the
+line and holds it, so your next command is appended to it and both are rejected
+as one unrecognised word. Most terminals send CRLF, which works — the CR
+submits — but leaves a stray LF that lands after the prompt.
+
+### Option C — DNS (no physical access)
 
 Only possible if the sign already holds a *hostname* rather than a literal IP —
 read it with `server_tcp_get`. Re-point that name at Home Assistant in your
@@ -191,22 +229,25 @@ returns `Connectivity in state 3`, the existing session's packet counter keeps
 incrementing, and no new connection is attempted. A mains-powered sign holds
 that session more or less permanently.
 
-So after `server_tcp_set` + `flash_save`, the sign moves when it next opens a
-connection, which is either:
+**What does work is `cs 1` and then `cs 3`.** `cs 1` drops connectivity to
+radio-on/unassociated, which is the step that actually tears the open socket
+down; `cs 3` then climbs back up — associate, DHCP, dial the server — and the
+new address is the one it dials. Seconds, and the picture stays on the glass.
+This is what the commissioning panel does, and it is the correction to an
+earlier version of this section that recommended `reboot`.
 
-* at the next spontaneous reconnect — these do happen (two were observed in a
-  22-minute window in the reference capture), so this is usually a matter of
-  minutes to tens of minutes; or
-* at the next `reboot`, which is the deterministic option and is the vendor's
-  own documented plan.
+So after `server_tcp_set` + `flash_save`, in order of preference:
 
-`cs 3` is still worth running — it is harmless and it does force a connect when
-the sign is *not* currently connected.
+* `cs 1` then `cs 3` — immediate, and the display is not disturbed;
+* `reboot` — also deterministic, costs about a minute of blank screen, and is
+  the vendor's own documented plan;
+* nothing at all — the sign moves when it next opens a connection by itself.
+  Observed in practice: it stayed on its old session for **about an hour** and
+  then moved of its own accord with no prompting.
 
-Observed in practice: after `server_tcp_set` + `flash_save`, the sign stayed on
-its old session for **about an hour** and then moved of its own accord, with no
-further prompting. So the honest advice is: do the two commands, then either
-reboot the sign for a deterministic switch, or walk away and check back later.
+`cs 3` alone is still worth knowing about, because it does force a connect when
+the sign is *not* currently connected — which is exactly why it looks like it
+works, right up until the one time you need it.
 
 ### You cannot run alongside the Visionect server
 
