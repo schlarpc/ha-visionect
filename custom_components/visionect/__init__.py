@@ -19,6 +19,7 @@ from homeassistant.helpers import device_registry as dr
 from pyvisionect.wire.errors import ListenError
 
 from .const import DOMAIN, OPTIONS_NEEDING_RELOAD, PLATFORMS
+from .panel import async_panel_config, async_register_panel, async_remove_panel
 from .runtime import VisionectRuntime
 from .services import async_setup_services
 
@@ -64,11 +65,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: VisionectConfigEntry) ->
         ) from err
 
     entry.runtime_data = runtime
+    # Commissioning a sign needs a serial cable, once, before it will ever talk
+    # to this listener. The panel is what makes that cable go into the user's
+    # own laptop instead of into a machine with a Python checkout on it. It is
+    # registered after the listener has bound, because the address it prefills
+    # into the form is the address the listener actually ended up on.
+    try:
+        await async_register_panel(
+            hass,
+            version=await _async_integration_version(hass),
+            config=async_panel_config(runtime),
+        )
+    except Exception:  # noqa: BLE001 - a sidebar entry is not worth failing setup
+        _LOGGER.exception(
+            "could not register the commissioning panel; the integration is "
+            "otherwise fine and signs already pointed at it will still work"
+        )
     runtime.async_register_listener_device()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     runtime.note_applied_options()
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+async def _async_integration_version(hass: HomeAssistant) -> str:
+    """The version from ``manifest.json``, used to cache-bust the panel assets.
+
+    A browser reuses an ES module it already has, and the module graph is not
+    revalidated per import, so without this an upgrade would leave the old
+    panel running against the new integration.
+    """
+    from homeassistant.loader import async_get_integration
+
+    integration = await async_get_integration(hass, DOMAIN)
+    return str(integration.version or "0")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: VisionectConfigEntry) -> bool:
@@ -78,6 +108,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: VisionectConfigEntry) -
     an unload callback is capped at 10 seconds, and a listener teardown that
     gets cut short leaves the port bound and the next bind failing.
     """
+    async_remove_panel(hass)
     await entry.runtime_data.async_shutdown()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
