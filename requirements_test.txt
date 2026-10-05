@@ -1,0 +1,9 @@
+# Pinned to the Home Assistant release the rig runs (2026.9.4).  The pin is not
+# optional: pytest-homeassistant-custom-component installs an exact Home
+# Assistant version, so a floating requirement silently re-tests a different
+# core.
+pytest-homeassistant-custom-component==0.13.367
+
+# The protocol library.  Not on PyPI yet, so tests install it from a checkout:
+#   uv pip install -e ../pyvisionect[imaging]
+# pyvisionect[imaging]

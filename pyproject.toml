@@ -1,0 +1,9 @@
+# Not a distributable package -- this file exists for pytest configuration and
+# the test dependency pins.  The integration itself is plain files under
+# custom_components/, which is how Home Assistant loads it.
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+norecursedirs = [".git", ".venv"]
+addopts = "-q --strict-markers"
