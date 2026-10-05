@@ -121,6 +121,9 @@
       },
       "panel_temperature": {
         "default": "mdi:thermometer"
+      },
+      "partials_since_refresh": {
+        "default": "mdi:select-compare"
       }
     }
   },

@@ -48,6 +48,15 @@ class VisionectSensorDescription(SensorEntityDescription):
     field: str | None = None
     value_fn: Callable[[Any], StateType | datetime] = lambda v: v
     derived_fn: Callable[[VisionectRuntime, str], StateType | datetime] | None = None
+    require_fn: Callable[[VisionectRuntime, str], bool] | None = None
+    """A second creation gate, for a sensor whose subject may not exist.
+
+    ``field`` covers "the sign reports this"; this covers "the sign is the kind
+    of sign this sensor is about at all". The ghosting counter is the case: it
+    is meaningless on hardware that cannot take a partial rectangle, and a
+    permanently-zero sensor saying so would be worse than its absence.
+    """
+    attrs_fn: Callable[[VisionectRuntime, str], dict[str, Any]] | None = None
 
 
 def _enum_name(value: Any) -> StateType:
@@ -236,6 +245,18 @@ SENSORS: tuple[VisionectSensorDescription, ...] = (
         derived_fn=lambda rt, uuid: rt.record(uuid).connections,
     ),
     VisionectSensorDescription(
+        key="partials_since_refresh",
+        translation_key="partials_since_refresh",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        derived_fn=lambda rt, uuid: rt.record(uuid).consecutive_partials,
+        attrs_fn=lambda rt, uuid: rt.partial_state(uuid),
+        # Only exists on hardware measured to take a partial rectangle, and
+        # it is enabled by default there because the whole point of the
+        # ghosting budget is that somebody can see it being spent.
+        require_fn=lambda rt, uuid: rt.partial_capable(uuid),
+    ),
+    VisionectSensorDescription(
         key="failed_pushes",
         translation_key="failed_pushes",
         state_class=SensorStateClass.TOTAL_INCREASING,
@@ -313,6 +334,8 @@ async def async_setup_entry(
                 continue
             if desc.field is not None and desc.field not in seen:
                 continue
+            if desc.require_fn is not None and not desc.require_fn(runtime, uuid):
+                continue
             known.add(key)
             new.append(VisionectSensor(runtime, uuid, desc))
         if new:
@@ -365,6 +388,13 @@ class VisionectSensor(VisionectEntity, RestoreSensor):
         if (data := await self.async_get_last_sensor_data()) is not None:
             # None covers both "nothing stored" and "stored but unparseable".
             self._restored = data.native_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        desc = self.entity_description
+        if desc.attrs_fn is None:
+            return None
+        return desc.attrs_fn(self.runtime, self._uuid)
 
     @property
     def native_value(self) -> StateType | datetime:

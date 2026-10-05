@@ -8,6 +8,8 @@ from typing import Final
 from homeassistant.const import Platform
 from homeassistant.util.signal_type import SignalTypeFormat
 
+from pyvisionect.imaging.constants import MAX_NO_FULL_UPDATE
+
 DOMAIN: Final = "visionect"
 
 DEFAULT_PORT: Final = 11113
@@ -30,6 +32,50 @@ DEFAULT_PERSIST_PARAMS: Final = True
 
 CONF_TLS_CERTFILE: Final = "tls_certfile"
 CONF_TLS_KEYFILE: Final = "tls_keyfile"
+
+# --- partial (screen-space) updates ----------------------------------------
+
+CONF_PARTIAL_UPDATES: Final = "partial_updates"
+"""Option key: ``{uuid: bool}``. Per sign, and absent means off."""
+
+DEFAULT_PARTIAL_UPDATES: Final = False
+
+CONF_PARTIAL_MAX_CONSECUTIVE: Final = "partial_max_consecutive"
+"""Option key: how many partials may go out before a full-screen push."""
+
+DEFAULT_PARTIAL_MAX_CONSECUTIVE: Final = MAX_NO_FULL_UPDATE
+"""The vendor's ``noFullUpdateMax``, which is 10 (``client.go:217``).
+
+This is the **ghosting budget**, and it is not a precaution. Measured on this
+hardware across eight accepted partial pushes and twelve rectangles, the
+firmware initiated no clearing refresh of its own: every partial logged
+``wfn: 2, inv: 0`` into exactly one ``UPD_FULL_AREA`` and nothing else
+(pyvisionect ``OPEN-QUESTIONS.md`` A10/A12). A full-screen push is the only
+thing that asks for the inverse clearing waveform, so a forced full push every
+N partials is the only thing that clears the panel. A device left to run
+partials forever turns to mush.
+
+Note *asks*: the same measurements caught the firmware granting the requested
+inverse refresh on some full pushes and silently declining it on others, with
+byte-identical headers. That is a reason to keep this conservative, not to
+raise it.
+"""
+
+PARTIAL_MAX_CONSECUTIVE_LIMIT: Final = 60
+"""The largest budget the options flow will accept.
+
+Deliberately finite. ``PartialPolicy`` takes a negative number to mean "never
+force a refresh", and offering that through the UI would be offering a setting
+whose consequence is permanent ghosting on a panel nobody can replace.
+"""
+
+# Changing one of these needs the entry reloaded, because it decides how the
+# socket is bound. Everything else -- which signs use partial updates, the
+# ghosting budget, whether parameter writes persist -- is read live, and
+# reloading for it would drop the listener. That matters more than it sounds:
+# a sign whose socket is closed re-dials on its own schedule, which on this
+# firmware can be an hour away.
+OPTIONS_NEEDING_RELOAD: Final = frozenset({CONF_TLS_CERTFILE, CONF_TLS_KEYFILE})
 
 # Both default to unset, and that is not timidity. The device side of TLS is
 # TCLV parameter 145, and on the firmware this integration was developed

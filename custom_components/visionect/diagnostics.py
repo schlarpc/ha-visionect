@@ -84,7 +84,14 @@ def _device(entry: VisionectConfigEntry, uuid: str) -> dict[str, Any]:
             "describe": panel.describe(),
         },
         "hardware_name_id": state.hardware_name_id,
+        # Two different questions, and the pair is here together on purpose:
+        # supports_rectangles is "would the vendor's server send one" (False
+        # for this hardware, by the vendor's own policy) and
+        # accepts_screen_rectangles is "was this hardware measured taking one"
+        # (True). A bug report that conflates them is the likely one.
         "supports_rectangles": state.supports_rectangles,
+        "accepts_screen_rectangles": state.accepts_screen_rectangles,
+        "partial_updates": runtime.partial_state(uuid),
         "pushed_checksum": state.pushed_checksum,
         "display_state_crc": status.display_state_crc if status else None,
         "in_sync": state.in_sync,

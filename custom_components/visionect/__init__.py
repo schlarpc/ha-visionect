@@ -18,7 +18,7 @@ from homeassistant.helpers import device_registry as dr
 
 from pyvisionect.wire.errors import ListenError
 
-from .const import DOMAIN, PLATFORMS
+from .const import DOMAIN, OPTIONS_NEEDING_RELOAD, PLATFORMS
 from .runtime import VisionectRuntime
 from .services import async_setup_services
 
@@ -66,6 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: VisionectConfigEntry) ->
     entry.runtime_data = runtime
     runtime.async_register_listener_device()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    runtime.note_applied_options()
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
@@ -84,7 +85,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: VisionectConfigEntry) -
 async def _async_update_listener(
     hass: HomeAssistant, entry: VisionectConfigEntry
 ) -> None:
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Reload only when an option actually needs the socket rebound.
+
+    The default "reload on any option change" is wrong here, and not mildly.
+    Reloading closes the listener, which drops the sign's TCP session -- and
+    this firmware re-dials on its own schedule, which can be the best part of
+    an hour away. So an option the runtime reads live, such as which signs use
+    partial updates, is applied in place and the kitchen display stays up.
+    """
+    runtime = getattr(entry, "runtime_data", None)
+    if runtime is None:  # pragma: no cover - entry not loaded
+        return
+    changed = runtime.changed_options(dict(entry.options))
+    runtime.note_applied_options()
+    if changed & OPTIONS_NEEDING_RELOAD:
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+    _LOGGER.debug("applying %s without a reload", sorted(changed) or "no change")
+    runtime.async_notify_entities()
 
 
 async def async_remove_config_entry_device(

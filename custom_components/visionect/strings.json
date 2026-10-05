@@ -42,7 +42,14 @@
   "options": {
     "step": {
       "init": {
-        "title": "Listener options",
+        "title": "Visionect options",
+        "menu_options": {
+          "settings": "Listener settings",
+          "partial_updates": "Partial screen updates"
+        }
+      },
+      "settings": {
+        "title": "Listener settings",
         "data": {
           "persist_params": "Persist device settings to flash",
           "tls_certfile": "TLS certificate file",
@@ -53,11 +60,27 @@
           "tls_certfile": "Optional, and off by default. A path readable by Home Assistant to a PEM certificate. With one configured the listener speaks TLS 1.3 to any sign that opens with a ClientHello and plaintext to every other sign, on the same port. Leave it empty unless you have set the sign's TLS mode (parameter 145) to 1 -- and set the certificate here first, because a sign asking for TLS from a listener without one can only be recovered over its USB serial console.",
           "tls_keyfile": "The private key, if it is not in the certificate file."
         }
+      },
+      "partial_updates": {
+        "title": "Partial screen updates",
+        "description": "**Off by default, and worth turning on deliberately.**\n\nA partial update redraws only the part of the screen that changed. On this hardware that is worth about **245x on the wire** -- a clock that changes one digit costs a few hundred bytes instead of ~78 KB -- and it saves Home Assistant dithering and packing 1.8 MB of pixels every time. It also draws in about **1.7 s instead of 2.9 s**. It will not give you continuous or animated updates, and nothing here should be read as promising that.\n\nThe catch is ghosting. Measured on real hardware, the firmware clears **nothing** by itself: across eight partial pushes it never once ran a clearing refresh of its own. Only a full-screen push asks for one. So every few partials a full push is forced, and that is not optional -- a panel left on partials forever slowly turns to mush.\n\n{count} sign(s) here are known to accept partial rectangles. Signs that have not been verified on hardware are not listed, because there is no way to ask a sign this question.\n\nWatch the **Partials since refresh** sensor after you turn this on.",
+        "data": {
+          "partial_updates": "Signs using partial updates",
+          "partial_max_consecutive": "Forced full refresh every"
+        },
+        "data_description": {
+          "partial_updates": "Unlisted signs are left exactly as they were. Turning a sign off takes effect on its next push; it does not reload the listener, so no sign loses its connection.",
+          "partial_max_consecutive": "Partial pushes allowed before one full-screen push is forced to clear the panel. The default of {default_max} is the vendor's own limit. Raising it is a bet: the same measurements caught this firmware granting the requested clearing refresh on some full pushes and silently declining it on others, so a forced full push asks for a clean-up rather than guaranteeing one."
+        }
       }
     },
     "error": {
       "bad_certificate": "That certificate or key could not be loaded. Check the path, the file permissions, and that both are PEM.",
       "key_without_certificate": "A key on its own does nothing. Give the certificate file too, or clear both."
+    },
+    "abort": {
+      "not_loaded": "The listener is not running, so its signs cannot be listed. Fix the setup error first.",
+      "no_partial_capable": "No sign here is known to accept partial rectangles. The list comes from hardware that was actually measured taking one, and a sign has to have reported its hardware id at least once to be on it -- so if your sign has never connected, wait for its first contact and come back."
     }
   },
   "issues": {
@@ -212,6 +235,9 @@
       },
       "bind_address": {
         "name": "Bind address"
+      },
+      "partials_since_refresh": {
+        "name": "Partials since refresh"
       }
     }
   },

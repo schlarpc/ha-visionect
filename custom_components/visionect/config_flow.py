@@ -25,18 +25,23 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
 
 from pyvisionect.io.tcp import server_ssl_context
 
 from .const import (
+    CONF_PARTIAL_MAX_CONSECUTIVE,
+    CONF_PARTIAL_UPDATES,
     CONF_PERSIST_PARAMS,
     CONF_TLS_CERTFILE,
     CONF_TLS_KEYFILE,
     DEFAULT_HOST,
+    DEFAULT_PARTIAL_MAX_CONSECUTIVE,
     DEFAULT_PERSIST_PARAMS,
     DEFAULT_PORT,
     DOMAIN,
+    PARTIAL_MAX_CONSECUTIVE_LIMIT,
 )
 
 
@@ -195,9 +200,22 @@ class VisionectConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class VisionectOptionsFlow(OptionsFlow):
-    """Entry-level behaviour that is not per sign."""
+    """Entry-level behaviour that is not per sign -- plus the one thing that is.
+
+    Partial updates are deliberately *not* a per-sign entity. The owner wants
+    to turn them on knowing what they are turning on, once, and then watch the
+    ghosting counter; a config toggle under Configure says that, and a switch
+    sitting among the sign's other entities does not.
+    """
 
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_show_menu(
+            step_id="init", menu_options=["settings", "partial_updates"]
+        )
+
+    async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -219,8 +237,8 @@ class VisionectOptionsFlow(OptionsFlow):
                     errors["base"] = "bad_certificate"
                     _LOGGER.debug("rejecting TLS certificate %s: %s", certfile, err)
             if not errors:
-                return self.async_create_entry(
-                    data={
+                return self._save(
+                    {
                         CONF_PERSIST_PARAMS: user_input[CONF_PERSIST_PARAMS],
                         CONF_TLS_CERTFILE: certfile,
                         CONF_TLS_KEYFILE: keyfile,
@@ -230,7 +248,7 @@ class VisionectOptionsFlow(OptionsFlow):
         options = self.config_entry.options
         suggested = user_input if user_input is not None else options
         return self.async_show_form(
-            step_id="init",
+            step_id="settings",
             data_schema=vol.Schema(
                 {
                     vol.Required(
@@ -252,4 +270,105 @@ class VisionectOptionsFlow(OptionsFlow):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_partial_updates(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose which signs send screen-space partial rectangles.
+
+        Only signs whose ``HardwareNameID`` is in the library's verified set
+        are offered at all. That set is a record of an experiment on physical
+        hardware, not a capability a device advertises -- there is no way to
+        ask a sign this question -- so an unverified sign is simply not on the
+        list rather than being offered a switch that might damage its panel.
+        """
+        runtime = getattr(self.config_entry, "runtime_data", None)
+        if runtime is None:
+            return self.async_abort(reason="not_loaded")
+
+        capable = [
+            uuid for uuid in runtime.known_uuids() if runtime.partial_capable(uuid)
+        ]
+        if not capable:
+            return self.async_abort(reason="no_partial_capable")
+
+        if user_input is not None:
+            chosen = set(user_input.get(CONF_PARTIAL_UPDATES) or [])
+            # Signs that are not on the list keep whatever they had, so a sign
+            # that happens to be asleep and absent from known_uuids() is not
+            # silently switched off.
+            existing = dict(self.config_entry.options.get(CONF_PARTIAL_UPDATES) or {})
+            for uuid in capable:
+                existing[uuid] = uuid in chosen
+            return self._save(
+                {
+                    CONF_PARTIAL_UPDATES: existing,
+                    CONF_PARTIAL_MAX_CONSECUTIVE: int(
+                        user_input[CONF_PARTIAL_MAX_CONSECUTIVE]
+                    ),
+                }
+            )
+
+        enabled = dict(self.config_entry.options.get(CONF_PARTIAL_UPDATES) or {})
+        registry = dr.async_get(self.hass)
+
+        def _label(uuid: str) -> str:
+            device = registry.async_get_device_by_identifier(
+                (DOMAIN, uuid), self.config_entry.entry_id
+            )
+            name = (device.name_by_user or device.name) if device else None
+            return f"{name} ({uuid[:8]})" if name else uuid
+
+        return self.async_show_form(
+            step_id="partial_updates",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_PARTIAL_UPDATES,
+                        default=[u for u in capable if enabled.get(u)],
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(
+                                    value=uuid, label=_label(uuid)
+                                )
+                                for uuid in capable
+                            ],
+                            multiple=True,
+                            mode=selector.SelectSelectorMode.LIST,
+                        )
+                    ),
+                    vol.Required(
+                        CONF_PARTIAL_MAX_CONSECUTIVE,
+                        default=self.config_entry.options.get(
+                            CONF_PARTIAL_MAX_CONSECUTIVE,
+                            DEFAULT_PARTIAL_MAX_CONSECUTIVE,
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=PARTIAL_MAX_CONSECUTIVE_LIMIT,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                }
+            ),
+            description_placeholders={
+                "count": str(len(capable)),
+                "default_max": str(DEFAULT_PARTIAL_MAX_CONSECUTIVE),
+            },
+        )
+
+    @callback
+    def _save(self, updates: dict[str, Any]) -> ConfigFlowResult:
+        """Merge one step's answers into the options, keeping the other step's.
+
+        A menu-shaped options flow has to do this by hand: ``create_entry``
+        replaces the whole options mapping, so returning only the step's own
+        keys would silently wipe the other step's settings.
+        """
+        return self.async_create_entry(
+            data={**self.config_entry.options, **updates}
         )

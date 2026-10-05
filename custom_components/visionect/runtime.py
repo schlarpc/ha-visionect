@@ -38,7 +38,13 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from pyvisionect.devices import panel_for
-from pyvisionect.imaging import FrameState, decode_image_packet, encode_frame
+from pyvisionect.imaging import (
+    FrameState,
+    PartialPolicy,
+    decode_image_packet,
+    encode_frame,
+)
+from pyvisionect.imaging.panel import Panel as ImagingPanel
 from pyvisionect.io import VisionectServer
 from pyvisionect.io.tcp import FileReadError, server_ssl_context
 from pyvisionect.session import (
@@ -68,6 +74,8 @@ from pyvisionect.packets.stored import parse_stored_frame
 from pyvisionect.wire import STORED_ONLY
 
 from .const import (
+    CONF_PARTIAL_MAX_CONSECUTIVE,
+    CONF_PARTIAL_UPDATES,
     CONF_PERSIST_PARAMS,
     CONF_TLS_CERTFILE,
     CONF_TLS_KEYFILE,
@@ -75,6 +83,8 @@ from .const import (
     DEFAULT_DITHER,
     DEFAULT_ENCODING,
     DEFAULT_FIT,
+    DEFAULT_PARTIAL_MAX_CONSECUTIVE,
+    DEFAULT_PARTIAL_UPDATES,
     DEFAULT_PERSIST_PARAMS,
     DITHER_MODES,
     DOMAIN,
@@ -172,6 +182,21 @@ class DeviceRecord:
     static_label: str = ""
     checked_crc_this_run: bool = False
     seen_fields: set[str] = field(default_factory=set)
+    consecutive_partials: int = 0
+    """Partial pushes acked since the last full-screen one.
+
+    Persisted, because the ghosting budget is a property of the glass and not
+    of this process: a restart that forgot the counter would quietly extend
+    the interval between clearing refreshes.
+    """
+    last_frame_full: bool = True
+    last_fallback_reason: str | None = None
+    """Why the last frame went out full screen when a partial was asked for.
+
+    One of the encoder's short stable strings -- ``no-previous-state``,
+    ``ghosting-refresh-due``, ``not-worth-it``, ``too-many-regions``,
+    ``re-encode``, ``forced`` -- or ``None`` when nothing was downgraded.
+    """
 
     @property
     def needs_push(self) -> bool:
@@ -209,6 +234,9 @@ class DeviceRecord:
             "last_failure": self.last_failure.isoformat() if self.last_failure else None,
             "static_label": self.static_label,
             "seen_fields": sorted(self.seen_fields),
+            "consecutive_partials": self.consecutive_partials,
+            "last_frame_full": self.last_frame_full,
+            "last_fallback_reason": self.last_fallback_reason,
         }
 
     @classmethod
@@ -234,7 +262,22 @@ class DeviceRecord:
             last_failure=_dt(raw.get("last_failure")),
             static_label=raw.get("static_label") or "",
             seen_fields=set(raw.get("seen_fields") or []),
+            consecutive_partials=max(0, int(raw.get("consecutive_partials") or 0)),
+            last_frame_full=bool(raw.get("last_frame_full", True)),
+            last_fallback_reason=raw.get("last_fallback_reason"),
         )
+
+
+@dataclass(slots=True)
+class _InflightFrame:
+    """The state a refused push has to be rolled back to."""
+
+    uuid: str
+    prev_state: Any
+    prev_consecutive: int
+    next_consecutive: int
+    full_screen: bool
+    rectangles: int
 
 
 class VisionectRuntime:
@@ -267,12 +310,24 @@ class VisionectRuntime:
         self._persist: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._frame_dir = Path(hass.config.path(".storage")) / FRAME_DIR
         self._inflight_push: dict[int, tuple[str, int]] = {}
+        self._inflight_frame: dict[int, _InflightFrame] = {}
+        """What to undo if a push is refused.
+
+        ``send_image`` adopts the new ``FrameState`` at send time, not at ack
+        time, because the library has no ack to wait for at that point. On the
+        full-screen path a wrong state image costs one redundant redraw. On the
+        partial path it is worse than that: every later partial carries the
+        unchanged partner lane *read out of the state image*, so a state that
+        claims pixels the glass never drew poisons each subsequent rectangle
+        and the device's echoed ``DisplayStateCRC`` can never agree again.
+        """
         self._reconciling: set[str] = set()
         self._save_unsub: Any = None
         self._no_device_unsub: Any = None
         self._overdue_unsub: Any = None
         self._overdue: dict[str, bool] = {}
         self._forgotten: set[str] = set()
+        self._applied_options: dict[str, Any] = dict(entry.options)
         self.advertised_address = f"{self.host}:{self.port}"
         """What to tell a human the sign should be dialling.
 
@@ -499,6 +554,19 @@ class VisionectRuntime:
         if changed:
             self.async_notify_entities()
 
+    # --------------------------------------------------------------- options
+
+    @callback
+    def note_applied_options(self) -> None:
+        """Snapshot the options as they stand, for the next change to diff."""
+        self._applied_options = dict(self.entry.options)
+
+    def changed_options(self, options: dict[str, Any]) -> frozenset[str]:
+        """Which option keys differ from the ones currently in force."""
+        before = self._applied_options
+        keys = set(before) | set(options)
+        return frozenset(k for k in keys if before.get(k) != options.get(k))
+
     # ----------------------------------------------------------- persistence
 
     @callback
@@ -574,6 +642,87 @@ class VisionectRuntime:
         state = self.device_state(uuid)
         display_type = state.display_type
         return panel_for(display_type if display_type is not None else -1)
+
+    # ------------------------------------------------------ partial updates
+
+    def partial_capable(self, uuid: str) -> bool:
+        """Whether screen-space partial updates may be offered for this sign.
+
+        Two independent conditions, and conflating them is the mistake this
+        method exists to prevent:
+
+        * :attr:`DeviceState.accepts_screen_rectangles` -- "a device with this
+          ``HardwareNameID`` was *measured* taking a partial rectangle". It is
+          a record of an experiment on one physical sign, not a capability any
+          device advertises, and it is False until the sign has said what it
+          is. Note it is **not** ``supports_rectangles``, which answers the
+          different question "would the vendor's own server ever send one" and
+          is False for this hardware on purpose.
+        * the panel's own geometry -- ``Panel.supports_screen_rectangles``,
+          which needs a known interlace map. Hardware revision 1.0.0 uses
+          interlacing mode 1, for which there is no lane map, so the library
+          refuses either way.
+        """
+        if not self.device_state(uuid).accepts_screen_rectangles:
+            return False
+        try:
+            panel = ImagingPanel.adapt(self.panel(uuid))
+        except TypeError:  # pragma: no cover - defensive
+            return False
+        return bool(panel.supports_screen_rectangles)
+
+    def partial_requested(self, uuid: str) -> bool:
+        """Whether the user has asked for partials on this sign.
+
+        Read straight from the entry options on every frame, so flipping it
+        takes effect on the next push without a reload -- which is the point:
+        reloading closes the listener, and a sign whose socket closes re-dials
+        on its own schedule.
+        """
+        option = self.entry.options.get(CONF_PARTIAL_UPDATES) or {}
+        if not isinstance(option, dict):
+            return bool(option)
+        return bool(option.get(uuid, DEFAULT_PARTIAL_UPDATES))
+
+    def partial_enabled(self, uuid: str) -> bool:
+        """Asked for *and* possible."""
+        return self.partial_requested(uuid) and self.partial_capable(uuid)
+
+    @property
+    def partial_max_consecutive(self) -> int:
+        raw = self.entry.options.get(
+            CONF_PARTIAL_MAX_CONSECUTIVE, DEFAULT_PARTIAL_MAX_CONSECUTIVE
+        )
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return DEFAULT_PARTIAL_MAX_CONSECUTIVE
+
+    @property
+    def partial_policy(self) -> PartialPolicy:
+        return PartialPolicy(max_consecutive_partials=self.partial_max_consecutive)
+
+    def partial_refresh_due(self, uuid: str) -> bool:
+        """Whether the next frame will be promoted to full screen for ghosting."""
+        if not self.partial_enabled(uuid):
+            return False
+        return self.partial_policy.refresh_due(
+            self.record(uuid).consecutive_partials
+        )
+
+    def partial_state(self, uuid: str) -> dict[str, Any]:
+        """Everything a human needs to watch the ghosting budget."""
+        rec = self.record(uuid)
+        return {
+            "capable": self.partial_capable(uuid),
+            "requested": self.partial_requested(uuid),
+            "enabled": self.partial_enabled(uuid),
+            "consecutive_partials": rec.consecutive_partials,
+            "max_consecutive_partials": self.partial_max_consecutive,
+            "refresh_due": self.partial_refresh_due(uuid),
+            "last_frame_full": rec.last_frame_full,
+            "last_fallback_reason": rec.last_fallback_reason,
+        }
 
     def has_ever_seen(self, uuid: str) -> bool:
         snapshot = self.coordinator.snapshot(uuid)
@@ -1014,10 +1163,53 @@ class VisionectRuntime:
                 rec.want_revision += 1
         self.async_schedule_save()
 
+    def _note_pushed_frame(
+        self, uuid: str, frame: Any, packet_id: int, prev_state: Any
+    ) -> None:
+        """Remember what this push would change, and what to undo if refused.
+
+        The ghosting counter advances on the **ack**, not on the send. A frame
+        the device refused did not draw and so spent no budget -- and counting
+        it would quietly bring the forced refresh forward, which is harmless,
+        while *not* rolling back the state image is not.
+        """
+        rec = self.record(uuid)
+        full = bool(getattr(frame, "full_screen", True))
+        self._inflight_frame[packet_id] = _InflightFrame(
+            uuid=uuid,
+            prev_state=prev_state,
+            prev_consecutive=rec.consecutive_partials,
+            # A full-screen push is where the inverse clearing waveform is
+            # requested, so it is what resets the budget.
+            next_consecutive=0 if full else rec.consecutive_partials + 1,
+            full_screen=full,
+            rectangles=len(frame.rectangles),
+        )
+        rec.last_frame_full = full
+        rec.last_fallback_reason = getattr(frame, "fallback_reason", None)
+
     def _on_acked(self, uuid: str, event: Acked) -> None:
         work = self.store.queue(uuid_to_bytes(uuid))
         slot = work.on_acked(event.packet_id)
         pushed = self._inflight_push.pop(event.packet_id, None)
+        if (inflight := self._inflight_frame.pop(event.packet_id, None)) is not None:
+            drawn = self.record(inflight.uuid)
+            drawn.consecutive_partials = inflight.next_consecutive
+            if not inflight.full_screen:
+                _LOGGER.debug(
+                    "%s drew %s partial rectangle(s); %s of %s before the "
+                    "forced clearing refresh",
+                    inflight.uuid,
+                    inflight.rectangles,
+                    drawn.consecutive_partials,
+                    self.partial_max_consecutive,
+                )
+            elif drawn.last_fallback_reason:
+                _LOGGER.debug(
+                    "%s drew full screen instead of a partial (%s)",
+                    inflight.uuid,
+                    drawn.last_fallback_reason,
+                )
         if pushed is not None:
             _uuid, revision = pushed
             rec = self.record(uuid)
@@ -1046,6 +1238,8 @@ class VisionectRuntime:
         pushed = self._inflight_push.pop(event.packet_id, None)
         rec = self.record(uuid)
         detail = "charging" if event.charging else f"error {event.error_code}"
+        if (inflight := self._inflight_frame.pop(event.packet_id, None)) is not None:
+            self._rollback_frame(inflight)
         if pushed is not None:
             rec.failed_pushes += 1
             rec.last_error = f"push refused ({detail})"
@@ -1064,6 +1258,29 @@ class VisionectRuntime:
         )
         self.async_schedule_save()
         self.async_notify_entities(uuid)
+
+    def _rollback_frame(self, inflight: _InflightFrame) -> None:
+        """Undo a push the device refused.
+
+        Three things, and the order does not matter but the completeness does:
+        put the state image back to what the glass actually shows, put the
+        ghosting counter back, and force the next push full screen. The last
+        one is the recovery: a full frame re-establishes every pixel and the
+        checksum from first principles, so whatever the refused partial would
+        have left behind cannot persist. It also means the stale ``.vnfs`` on
+        disk is harmless -- ``force_next`` is persisted alongside it.
+        """
+        rec = self.record(inflight.uuid)
+        state = self.device_state(inflight.uuid)
+        state.imaging_state = inflight.prev_state
+        rec.consecutive_partials = inflight.prev_consecutive
+        rec.force_next = True
+        _LOGGER.warning(
+            "%s refused a %s push; rolling the display state back and forcing "
+            "a full-screen redraw on the next contact",
+            inflight.uuid,
+            "full-screen" if inflight.full_screen else "partial",
+        )
 
     def _on_params(self, uuid: str, event: ParamsReceived) -> None:
         """Correct our view of the device's TCLV settings from the device."""
@@ -1279,6 +1496,7 @@ class VisionectRuntime:
             self.async_schedule_save()
             return
 
+        prev_state = self.device_state(uuid).imaging_state
         work.set_image(frame, force=rec.force_next, now=self._clock())
         conn = self.server.connection_for(device_id)
         if conn is None:
@@ -1289,15 +1507,20 @@ class VisionectRuntime:
         if packet_id is None:
             return
         self._inflight_push[packet_id] = (uuid, revision)
+        self._note_pushed_frame(uuid, frame, packet_id, prev_state)
         # Log the checksum the device will actually echo back, not the raw one:
         # a forced push deliberately perturbs ImageHeader.Checksum (it flips the
         # top bit) to buy one guaranteed full-screen redraw, and send_image
         # stores the perturbed value as pushed_checksum so in_sync stays
         # coherent. Logging the unperturbed value makes that look like a bug.
         _LOGGER.info(
-            "%s: pushing %s rectangles, checksum %s, packet id %s",
+            "%s: pushing %s %s rectangle(s)%s, checksum %s, packet id %s",
             uuid,
             len(frame.rectangles),
+            "full-screen" if frame.full_screen else "partial",
+            f" (wanted a partial: {frame.fallback_reason})"
+            if frame.fallback_reason
+            else "",
             self.device_state(uuid).pushed_checksum,
             packet_id,
         )
@@ -1380,6 +1603,7 @@ class VisionectRuntime:
         ):
             # A dither or depth change must force a full re-encode.
             prev = None
+        use_partial = self.partial_enabled(uuid)
         return await self.hass.async_add_executor_job(
             partial(
                 _encode_and_preview,
@@ -1389,6 +1613,9 @@ class VisionectRuntime:
                 dithering=dithering,
                 prev_state=prev,
                 force_full=rec.force_next,
+                use_partial=use_partial,
+                policy=self.partial_policy if use_partial else None,
+                consecutive_partials=rec.consecutive_partials,
             )
         )
 
@@ -1422,6 +1649,7 @@ class VisionectRuntime:
             rec.force_next = False
             self.async_schedule_save()
             return {"queued": False, "applied_immediately": False, "unchanged": True}
+        prev_state = self.device_state(uuid).imaging_state
         work.set_image(frame, force=rec.force_next, now=self._clock())
         self.previews[uuid] = preview
         await self.hass.async_add_executor_job(
@@ -1442,11 +1670,14 @@ class VisionectRuntime:
                 "queued": True,
                 "applied_immediately": False,
                 "expected_at": expected.isoformat() if expected else None,
+                "rectangles": len(frame.rectangles),
+                "full_screen": bool(frame.full_screen),
             }
         sent = conn.apply_pending(phases=(SLOT_IMAGE,), now=self._clock())
         packet_id = sent.get(SLOT_IMAGE)
         if packet_id is not None:
             self._inflight_push[packet_id] = (uuid, revision)
+            self._note_pushed_frame(uuid, frame, packet_id, prev_state)
             with contextlib.suppress(KeyError):
                 await self.server.flush(device_id)
         self.async_schedule_save()
@@ -1456,6 +1687,9 @@ class VisionectRuntime:
             "applied_immediately": True,
             "packet_id": packet_id,
             "checksum": frame.state_checksum,
+            "rectangles": len(frame.rectangles),
+            "full_screen": bool(frame.full_screen),
+            "fallback_reason": frame.fallback_reason,
         }
 
     def _friendly_name(self, uuid: str) -> str:
@@ -1484,6 +1718,9 @@ class VisionectRuntime:
         self.device_files.pop(uuid, None)
         self.device_file_meta.pop(uuid, None)
         self._sync_status.pop(uuid, None)
+        for packet_id, inflight in list(self._inflight_frame.items()):
+            if inflight.uuid == uuid:
+                self._inflight_frame.pop(packet_id, None)
         data = dict(self.coordinator.data or {})
         data.pop(uuid, None)
         self.coordinator.async_set_updated_data(data)
@@ -1507,6 +1744,9 @@ def _encode_and_preview(
     dithering: int,
     prev_state: Any,
     force_full: bool,
+    use_partial: bool = False,
+    policy: Any = None,
+    consecutive_partials: int = 0,
 ) -> tuple[Any, bytes]:
     """Encode and render the post-dither preview in one executor hop.
 
@@ -1527,6 +1767,12 @@ def _encode_and_preview(
         dithering=dithering,
         prev_state=prev_state,
         force_full_screen=force_full,
+        # partial=False is byte-for-byte the old call. With it True the encoder
+        # may still come back full screen -- for ghosting, for cost, for a
+        # first frame -- and says why in `fallback_reason`.
+        partial=use_partial,
+        partial_policy=policy,
+        consecutive_partials=consecutive_partials,
     )
     # quantise already returns expanded 8-bit grey -- {0, 17, 34, ... 255} at
     # 4 bpp, {0, 255} at 1 bpp -- not level indices. Scaling it again overflows
