@@ -121,6 +121,73 @@ class VisionectConfigFlow(ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Move the listener to a different address or port.
+
+        Without this the only way to change the port is to delete the entry,
+        which throws away every sign's content source, dither choice and
+        ghosting budget along with it.
+
+        One wrinkle the obvious implementation gets wrong: the running entry is
+        *already* bound to its own port, so test-binding an unchanged port
+        fails with EADDRINUSE and the form refuses a no-op. So the bind check
+        runs only for an address that actually changed.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        try:
+            self._detected_ip = await network.async_get_source_ip(self.hass)
+        except Exception:  # noqa: BLE001 - cosmetic only
+            self._detected_ip = "this host's LAN address"
+
+        if user_input is not None:
+            unchanged = (
+                user_input[CONF_HOST] == entry.data[CONF_HOST]
+                and user_input[CONF_PORT] == entry.data[CONF_PORT]
+            )
+            if not unchanged:
+                try:
+                    await _async_test_bind(
+                        user_input[CONF_HOST], user_input[CONF_PORT]
+                    )
+                except OSError as err:
+                    errors["base"] = (
+                        "port_in_use"
+                        if err.errno == errno.EADDRINUSE
+                        else "cannot_bind"
+                    )
+            if not errors:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    title=f"Visionect listener (port {user_input[CONF_PORT]})",
+                    data_updates={
+                        CONF_HOST: user_input[CONF_HOST],
+                        CONF_PORT: user_input[CONF_PORT],
+                    },
+                )
+
+        suggested = user_input if user_input is not None else entry.data
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_PORT, default=suggested.get(CONF_PORT, DEFAULT_PORT)
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+                    vol.Required(
+                        CONF_HOST, default=suggested.get(CONF_HOST, DEFAULT_HOST)
+                    ): selector.TextSelector(),
+                }
+            ),
+            description_placeholders={
+                "detected_ip": self._detected_ip,
+                "port": str(entry.data.get(CONF_PORT, DEFAULT_PORT)),
+            },
+            errors=errors,
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(entry: ConfigEntry) -> VisionectOptionsFlow:

@@ -16,6 +16,18 @@
       "instructions": {
         "title": "Point your sign at Home Assistant",
         "description": "Your sign **cannot be discovered**, and it cannot be told where to find Home Assistant over the network -- the server address is read-only over the wire. You must set it one of two ways.\n\n**Option A -- USB (always works, needs physical access)**\n\nConnect the sign's micro-USB port to a computer. It appears as a serial port at 115200 8N1 (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS). Then:\n\n```\nserver_tcp_set {detected_ip} {port}\nflash_save\ncs 3\n```\n\n`cs 3` forces a reconnect without a reboot.\n\n**Option B -- DNS (no physical access, but only if the sign already holds a hostname)**\n\nRe-point that hostname at {detected_ip} in your local DNS. The sign connects here on its next attempt.\n\n**Recommended:** use Option A once to set a *hostname you control*, not an IP address. Then you can move Home Assistant, change its address, or switch back to the Visionect server later without ever touching USB again.\n\nNote that pointing a sign here takes it away from the Visionect Software Suite completely: the sign holds exactly one server address and dials exactly one server."
+      },
+      "reconfigure": {
+        "title": "Move the listener",
+        "description": "The listener is on port **{port}** now. Changing it here keeps every sign's content source, dither choice and ghosting budget -- deleting the entry and adding it again does not.\n\nHome Assistant looks reachable at **{detected_ip}**.\n\n**The sign will not follow you.** It holds one server address and dials only that. Change the port here and the sign keeps calling the old one until you set it over USB as well:\n\n```\nserver_tcp_set {detected_ip} <new port>\nflash_save\ncs 1\ncs 3\n```\n\nWhich is the argument for pointing the sign at a *hostname* you control once, and moving the name instead.",
+        "data": {
+          "port": "Port",
+          "host": "Bind address"
+        },
+        "data_description": {
+          "port": "11113 is the firmware default, so a sign that has never been reconfigured needs no port argument at all.",
+          "host": "0.0.0.0 listens on every interface, which is the right default: Home Assistant's own address can change, and a bind to an address that later disappears fails on restart."
+        }
       }
     },
     "error": {
@@ -23,7 +35,8 @@
       "cannot_bind": "Home Assistant could not bind that address on this host."
     },
     "abort": {
-      "already_configured": "A Visionect listener is already configured. One listener serves every sign."
+      "already_configured": "A Visionect listener is already configured. One listener serves every sign.",
+      "reconfigure_successful": "The listener was moved. If you changed the port, set it on the sign too -- until you do, it is still calling the old one."
     }
   },
   "options": {
