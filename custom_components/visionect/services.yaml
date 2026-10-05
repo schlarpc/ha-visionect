@@ -1,0 +1,198 @@
+# Structure only. All human text lives in translations/en.json, which is what
+# hassfest reads for a custom integration.
+#
+# Every action takes both a device target and an entity target. The sign is the
+# unit of meaning and the handler resolves everything back to one, but the
+# obvious first thing a person reaches for is the entity they can see -- so the
+# picker offers it, and services.py accepts area, floor and label targets too.
+
+display_image:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+  fields:
+    image:
+      required: true
+      example: "camera.front_door"
+      selector:
+        text:
+    snapshot:
+      selector:
+        boolean:
+    fit:
+      selector:
+        select:
+          options: [fit, stretch, crop]
+    background:
+      example: "#FFFFFF"
+      selector:
+        text:
+    dither:
+      selector:
+        select:
+          options: [none, bayer, floyd_steinberg, blue_noise]
+    encoding:
+      selector:
+        select:
+          options: ["1_bit", "4_bit"]
+
+display_text:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+  fields:
+    message:
+      required: true
+      selector:
+        text:
+          multiline: true
+    size:
+      selector:
+        number:
+          min: 12
+          max: 400
+          mode: box
+    align:
+      selector:
+        select:
+          options: [left, center, right]
+    invert:
+      selector:
+        boolean:
+
+set_content_source:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+  fields:
+    source:
+      required: true
+      selector:
+        select:
+          options: [entity, url, blank]
+    entity_id_source:
+      selector:
+        entity:
+          domain: [image, camera]
+    url:
+      selector:
+        template:
+    headers:
+      selector:
+        object:
+
+clear_content:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+
+update_now:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+
+refresh:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+
+clear_screen:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+
+ghost_clear:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+
+read_parameters:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+  fields:
+    ids:
+      required: true
+      example: "[29]"
+      selector:
+        object:
+
+write_parameters:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+  fields:
+    values:
+      required: true
+      example: '{"29": 30}'
+      selector:
+        object:
+    persist:
+      selector:
+        boolean:
+
+list_device_files:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+
+read_device_file:
+  target:
+    device:
+      integration: visionect
+    entity:
+      integration: visionect
+  fields:
+    filename:
+      required: true
+      example: "/image0.pv2"
+      selector:
+        select:
+          custom_value: true
+          options:
+            - /image0.pv2
+            - /image1.pv2
+            - /image2.pv2
+            - /image3.pv2
+            - /image4.pv2
+            - /image5.pv2
+    decode:
+      selector:
+        boolean:
+    timeout:
+      advanced: true
+      selector:
+        number:
+          min: 1
+          max: 300
+          unit_of_measurement: s
+          mode: box
+    attempts:
+      advanced: true
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box

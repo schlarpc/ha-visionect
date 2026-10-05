@@ -1,0 +1,165 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "pending_changes": {
+        "default": "mdi:tray-full",
+        "state": {
+          "off": "mdi:tray"
+        }
+      },
+      "online": {
+        "default": "mdi:lan-connect",
+        "state": {
+          "off": "mdi:lan-disconnect"
+        }
+      },
+      "display_out_of_sync": {
+        "default": "mdi:image-sync"
+      },
+      "image_push_blocked": {
+        "default": "mdi:image-off"
+      }
+    },
+    "button": {
+      "update_now": {
+        "default": "mdi:refresh"
+      },
+      "refresh": {
+        "default": "mdi:image-refresh"
+      },
+      "clear_screen": {
+        "default": "mdi:square-outline"
+      },
+      "ghost_clear": {
+        "default": "mdi:ghost-outline"
+      }
+    },
+    "image": {
+      "screen": {
+        "default": "mdi:monitor-screenshot"
+      },
+      "device_file": {
+        "default": "mdi:file-image-outline"
+      }
+    },
+    "number": {
+      "heartbeat_interval": {
+        "default": "mdi:heart-pulse"
+      }
+    },
+    "select": {
+      "dither_mode": {
+        "default": "mdi:dots-grid"
+      },
+      "encoding": {
+        "default": "mdi:gradient-vertical"
+      },
+      "fit_mode": {
+        "default": "mdi:fit-to-screen-outline"
+      }
+    },
+    "sensor": {
+      "next_contact": {
+        "default": "mdi:clock-start"
+      },
+      "last_contact": {
+        "default": "mdi:clock-check-outline"
+      },
+      "last_push": {
+        "default": "mdi:image-check-outline"
+      },
+      "last_boot": {
+        "default": "mdi:clock-outline"
+      },
+      "display_updates": {
+        "default": "mdi:counter"
+      },
+      "status_reason": {
+        "default": "mdi:message-badge-outline"
+      },
+      "connect_reason": {
+        "default": "mdi:transit-connection-variant"
+      },
+      "filesystem_free": {
+        "default": "mdi:sd"
+      },
+      "mcu_awake_count": {
+        "default": "mdi:sleep-off"
+      },
+      "network_errors": {
+        "default": "mdi:network-strength-1-alert"
+      },
+      "wifi_dtim": {
+        "default": "mdi:timer-sand"
+      },
+      "access_point": {
+        "default": "mdi:router-wireless"
+      },
+      "connections": {
+        "default": "mdi:connection"
+      },
+      "failed_pushes": {
+        "default": "mdi:image-remove"
+      },
+      "accepted_connections": {
+        "default": "mdi:connection"
+      },
+      "identified_signs": {
+        "default": "mdi:check-network-outline"
+      },
+      "known_signs": {
+        "default": "mdi:monitor-multiple"
+      },
+      "bind_address": {
+        "default": "mdi:ip-network-outline"
+      },
+      "battery_voltage": {
+        "default": "mdi:flash-triangle-outline"
+      },
+      "battery_current": {
+        "default": "mdi:current-dc"
+      },
+      "panel_temperature": {
+        "default": "mdi:thermometer"
+      }
+    }
+  },
+  "services": {
+    "display_image": {
+      "service": "mdi:image"
+    },
+    "display_text": {
+      "service": "mdi:format-text"
+    },
+    "set_content_source": {
+      "service": "mdi:playlist-edit"
+    },
+    "clear_content": {
+      "service": "mdi:playlist-remove"
+    },
+    "update_now": {
+      "service": "mdi:refresh"
+    },
+    "refresh": {
+      "service": "mdi:image-refresh"
+    },
+    "clear_screen": {
+      "service": "mdi:square-outline"
+    },
+    "ghost_clear": {
+      "service": "mdi:ghost-outline"
+    },
+    "read_parameters": {
+      "service": "mdi:download-network-outline"
+    },
+    "write_parameters": {
+      "service": "mdi:upload-network-outline"
+    },
+    "list_device_files": {
+      "service": "mdi:file-search-outline"
+    },
+    "read_device_file": {
+      "service": "mdi:file-download-outline"
+    }
+  }
+}

@@ -1,0 +1,343 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Host the listener",
+        "description": "Your sign dials out to Home Assistant; nothing dials the sign. This step binds the port it will call.\n\nHome Assistant looks reachable at **{detected_ip}**. Keep the default port unless you have already changed it on the sign over USB.",
+        "data": {
+          "port": "Port",
+          "host": "Bind address"
+        },
+        "data_description": {
+          "port": "11113 is the firmware default, so a sign that has never been reconfigured needs no port argument at all.",
+          "host": "0.0.0.0 listens on every interface, which is the right default: Home Assistant's own address can change, and a bind to an address that later disappears fails on restart."
+        }
+      },
+      "instructions": {
+        "title": "Point your sign at Home Assistant",
+        "description": "Your sign **cannot be discovered**, and it cannot be told where to find Home Assistant over the network -- the server address is read-only over the wire. You must set it one of two ways.\n\n**Option A -- USB (always works, needs physical access)**\n\nConnect the sign's micro-USB port to a computer. It appears as a serial port at 115200 8N1 (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS). Then:\n\n```\nserver_tcp_set {detected_ip} {port}\nflash_save\ncs 3\n```\n\n`cs 3` forces a reconnect without a reboot.\n\n**Option B -- DNS (no physical access, but only if the sign already holds a hostname)**\n\nRe-point that hostname at {detected_ip} in your local DNS. The sign connects here on its next attempt.\n\n**Recommended:** use Option A once to set a *hostname you control*, not an IP address. Then you can move Home Assistant, change its address, or switch back to the Visionect server later without ever touching USB again.\n\nNote that pointing a sign here takes it away from the Visionect Software Suite completely: the sign holds exactly one server address and dials exactly one server."
+      }
+    },
+    "error": {
+      "port_in_use": "Something else already holds that port. Stop it, or pick another port -- but note that only the hostname can be moved in DNS, so changing the port means another USB trip.",
+      "cannot_bind": "Home Assistant could not bind that address on this host."
+    },
+    "abort": {
+      "already_configured": "A Visionect listener is already configured. One listener serves every sign."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Listener options",
+        "data": {
+          "persist_params": "Persist device settings to flash"
+        },
+        "data_description": {
+          "persist_params": "Issue a flash save after every parameter write. Without it a setting is RAM-only and is lost at the next reboot; with it every change costs a flash write."
+        }
+      }
+    }
+  },
+  "issues": {
+    "no_device_connected": {
+      "title": "No Visionect sign has connected",
+      "description": "Home Assistant is listening on {host}:{port} and has accepted {accepted} connections, but no sign has identified itself.\n\nA sign cannot be discovered: it has to be pointed at this address explicitly, over USB (`server_tcp_set` + `flash_save` + `cs 3`) or by re-pointing a hostname it already holds.\n\nIf Home Assistant runs in a container on a bridge network, the port is not reachable from the LAN until you publish it -- and **that needs the container recreated, not restarted**: `docker compose up -d --force-recreate`. A plain `docker restart` will appear to change nothing."
+    }
+  },
+  "exceptions": {
+    "port_in_use": {
+      "message": "Could not bind port {port}: {error}. This is usually transient -- a reload race or a lingering socket -- so Home Assistant will keep retrying."
+    },
+    "cannot_bind": {
+      "message": "Cannot bind {host}:{port}: {error}. Waiting will not fix this; change the bind address."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "pending_changes": {
+        "name": "Pending changes",
+        "state": {
+          "off": "Settled",
+          "on": "Waiting for the sign"
+        }
+      },
+      "online": {
+        "name": "Connected"
+      },
+      "charging": {
+        "name": "Charging"
+      },
+      "display_out_of_sync": {
+        "name": "Display out of sync"
+      },
+      "image_push_blocked": {
+        "name": "Image push blocked"
+      }
+    },
+    "button": {
+      "update_now": {
+        "name": "Update now"
+      },
+      "refresh": {
+        "name": "Refresh display"
+      },
+      "clear_screen": {
+        "name": "Clear screen"
+      },
+      "ghost_clear": {
+        "name": "Ghost clear (experimental)"
+      }
+    },
+    "image": {
+      "screen": {
+        "name": "Screen"
+      },
+      "device_file": {
+        "name": "Device file"
+      }
+    },
+    "number": {
+      "heartbeat_interval": {
+        "name": "Heartbeat interval"
+      }
+    },
+    "select": {
+      "dither_mode": {
+        "name": "Dither mode",
+        "state": {
+          "none": "None",
+          "bayer": "Bayer (1-bit only)",
+          "floyd_steinberg": "Floyd-Steinberg",
+          "blue_noise": "Blue noise"
+        }
+      },
+      "encoding": {
+        "name": "Encoding",
+        "state": {
+          "1_bit": "1-bit (2 levels)",
+          "4_bit": "4-bit (16 levels)"
+        }
+      },
+      "fit_mode": {
+        "name": "Fit mode",
+        "state": {
+          "fit": "Fit",
+          "stretch": "Stretch",
+          "crop": "Crop"
+        }
+      }
+    },
+    "sensor": {
+      "next_contact": {
+        "name": "Next contact"
+      },
+      "last_contact": {
+        "name": "Last contact"
+      },
+      "last_push": {
+        "name": "Last push"
+      },
+      "last_boot": {
+        "name": "Last boot"
+      },
+      "display_updates": {
+        "name": "Display updates"
+      },
+      "status_reason": {
+        "name": "Last status reason"
+      },
+      "connect_reason": {
+        "name": "Connect reason"
+      },
+      "filesystem_free": {
+        "name": "Filesystem free"
+      },
+      "mcu_awake_count": {
+        "name": "MCU awake count"
+      },
+      "network_errors": {
+        "name": "Network errors"
+      },
+      "wifi_dtim": {
+        "name": "Wi-Fi DTIM"
+      },
+      "access_point": {
+        "name": "Access point"
+      },
+      "connections": {
+        "name": "Connections"
+      },
+      "failed_pushes": {
+        "name": "Failed pushes"
+      },
+      "battery_voltage": {
+        "name": "Battery voltage"
+      },
+      "battery_current": {
+        "name": "Battery current"
+      },
+      "panel_temperature": {
+        "name": "Panel temperature"
+      },
+      "accepted_connections": {
+        "name": "Accepted connections"
+      },
+      "identified_signs": {
+        "name": "Identified signs"
+      },
+      "known_signs": {
+        "name": "Known signs"
+      },
+      "bind_address": {
+        "name": "Bind address"
+      }
+    }
+  },
+  "services": {
+    "display_image": {
+      "name": "Display image",
+      "description": "Show a picture on a sign. Passing an entity id sets a live source that is re-read at every contact; passing a path or URL snapshots it now.",
+      "fields": {
+        "image": {
+          "name": "Image",
+          "description": "An image.* or camera.* entity id, an http(s) URL, or a local file path inside allowlist_external_dirs."
+        },
+        "snapshot": {
+          "name": "Snapshot",
+          "description": "Capture an entity once instead of making it a live source."
+        },
+        "fit": {
+          "name": "Fit",
+          "description": "How to place the picture on the panel."
+        },
+        "background": {
+          "name": "Background",
+          "description": "Letterbox colour as #RRGGBB. White is the paper colour, so white letterboxing is invisible; black is a solid bar."
+        },
+        "dither": {
+          "name": "Dither",
+          "description": "Bayer is bi-level only, so it is treated as blue noise at 4-bit."
+        },
+        "encoding": {
+          "name": "Encoding",
+          "description": "1-bit or 4-bit greyscale."
+        }
+      }
+    },
+    "display_text": {
+      "name": "Display text",
+      "description": "Render a short message: one font, one size, word-wrapped, vertically centred. For anything more elaborate, serve an HTML page and use a url content source -- that gives you a real layout engine.",
+      "fields": {
+        "message": {
+          "name": "Message",
+          "description": "The text to show."
+        },
+        "size": {
+          "name": "Size",
+          "description": "Font size in pixels on a 1440x2560 canvas."
+        },
+        "align": {
+          "name": "Align",
+          "description": "Horizontal alignment."
+        },
+        "invert": {
+          "name": "Invert",
+          "description": "White text on black."
+        }
+      }
+    },
+    "set_content_source": {
+      "name": "Set content source",
+      "description": "Say what this sign displays. The source is re-read at the moment the sign is reachable, so an hourly sign shows a fresh render every hour with no automation.",
+      "fields": {
+        "source": {
+          "name": "Source",
+          "description": "Where the picture comes from."
+        },
+        "entity_id_source": {
+          "name": "Entity",
+          "description": "The image.* or camera.* entity to re-read at every contact."
+        },
+        "url": {
+          "name": "URL",
+          "description": "Fetched at push time and rendered as a template first, so ?t={{ now().timestamp() }} works for cache-busting."
+        },
+        "headers": {
+          "name": "Headers",
+          "description": "Outgoing HTTP headers, which is how you authenticate a renderer, e.g. Authorization: Bearer <token>."
+        }
+      }
+    },
+    "clear_content": {
+      "name": "Clear content source",
+      "description": "Forget this sign's content source. The screen keeps whatever it is showing until the next push."
+    },
+    "update_now": {
+      "name": "Update now",
+      "description": "Re-resolve the content source and push on the next contact."
+    },
+    "refresh": {
+      "name": "Refresh display",
+      "description": "Re-push the current frame even if the sign reports it is already in sync. Every push to this hardware is full-screen, so this is a genuine full-screen refresh."
+    },
+    "clear_screen": {
+      "name": "Clear screen",
+      "description": "Push an all-white frame."
+    },
+    "ghost_clear": {
+      "name": "Ghost clear",
+      "description": "Experimental. Queues an inverse full-screen pass to clear e-ink ghosting. The server-side signalling is verified; the firmware's reaction to it is not, and on a stock configuration it may do nothing beyond a second push."
+    },
+    "read_parameters": {
+      "name": "Read device parameters",
+      "description": "Queue a TCLV read. Reads are nearly free and are coalesced as a set.",
+      "fields": {
+        "ids": {
+          "name": "Parameter ids",
+          "description": "A list of TCLV ids, e.g. [29]."
+        }
+      }
+    },
+    "write_parameters": {
+      "name": "Write device parameters",
+      "description": "Queue a TCLV write, last-write-wins per id, followed by a read so the device gets the last word. Eight ids -- the hardware id, the server address and the Wi-Fi credentials -- are read-only over the network and can only be set over USB.",
+      "fields": {
+        "values": {
+          "name": "Values",
+          "description": "A mapping of TCLV id to integer, e.g. {\"29\": 30}."
+        },
+        "persist": {
+          "name": "Persist",
+          "description": "Save to flash afterwards. Overrides the entry option for this call."
+        }
+      }
+    },
+    "list_device_files": {
+      "name": "List device files",
+      "description": "Read the sign's filesystem root. There is no list opcode in the protocol; this is a read of \".\", which is what the vendor's own server does. One round trip, so it answers immediately when the sign is connected and is queued for its next contact otherwise."
+    },
+    "read_device_file": {
+      "name": "Read device file",
+      "description": "Pull one file off the sign's own flash and, if it is a stored frame, decode it into a picture. This is slow: the device answers 1 KiB at a time at about 2.3 KiB/s and offers no seek, so a file takes one to nine minutes and a lost reply restarts it. Note these files are not a live framebuffer -- on this firmware they are Visionect's shipped demo screens and do not change when you push. What the panel is showing is answered for free by the \"Display out of sync\" sensor.",
+      "fields": {
+        "filename": {
+          "name": "File name",
+          "description": "A path from the file listing, slash included, such as /image0.pv2."
+        },
+        "decode": {
+          "name": "Decode",
+          "description": "Decode the file as an image into the Device file entity. Turn off to fetch the bytes and only report the headers."
+        },
+        "timeout": {
+          "name": "Reply timeout",
+          "description": "Seconds to wait for any one 1 KiB reply before treating it as lost."
+        },
+        "attempts": {
+          "name": "Attempts",
+          "description": "How many times to restart the transfer from the beginning after a lost reply. There is no seek, so there is no way to resume."
+        }
+      }
+    }
+  }
+}
