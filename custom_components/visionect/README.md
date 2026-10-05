@@ -313,12 +313,22 @@ one font, one size, word-wrapped, centred. It will not grow. Anything more
 elaborate is a layout engine, and the right layout engine is the browser you
 already have.
 
-### Every push is 1.84 MB
+### Every push is 1.84 MB — unless you turn partial updates on
 
-This hardware cannot do partial updates — the rectangle support flag is false
-unconditionally for it — so every push is a single full-screen frame. Please do
-not point a sign at a source that changes every minute. The display-update
-count is exposed as a sensor because e-ink panels have a finite update budget.
+By default every push is a single full-screen frame: 1.84 MB of raw pixels,
+about 78 KB on the wire, and two to five seconds on the glass. Please do not
+point a sign at a source that changes every minute. The display-update count is
+exposed as a sensor because e-ink panels have a finite update budget.
+
+**Partial screen updates change the first two of those numbers and not the
+third.** They are off by default, opt-in per sign, under *Configure →
+Partial screen updates*. See [Partial screen updates](#partial-screen-updates).
+
+The old claim here was that this hardware *cannot* do partial updates. That was
+never a statement about the hardware. The vendor's own server asks
+`getRectangleSupport`, which returns false unconditionally for `HardwareNameID
+8`, so this sign has simply never been sent a rectangle. We are the server now,
+and it takes them.
 
 ---
 
@@ -514,6 +524,94 @@ credential family — are **read-only over the network** and can only be set ove
 USB. `visionect.write_parameters` refuses them with an error that names the USB
 command instead.
 
+### Moving the listener
+
+*Configure* is for behaviour; the port lives in the entry's data and is changed
+with **Reconfigure** on the entry's menu. Doing it that way keeps every sign's
+content source, dither choice, persisted frame state and ghosting budget, all
+of which deleting and re-adding the entry throws away.
+
+The sign will not follow you. It holds exactly one server address and dials
+exactly that, so changing the port here means setting it on the sign as well —
+which is the argument for pointing the sign at a *hostname* you control once
+and moving the name afterwards.
+
+---
+
+## Partial screen updates
+
+**Off by default, per sign, and worth turning on deliberately.** *Configure →
+Partial screen updates* lists the signs that are known to accept a rectangle
+and nothing else.
+
+### What it buys, and what it does not
+
+A partial update redraws only the part of the screen that changed. Measured on
+the real sign, pushing a dashboard whose clock digit changed:
+
+| | full screen | partial |
+|---|---:|---:|
+| wire bytes | 58–78 KB | 1.5–5 KB |
+| raw bytes encoded | 1 843 200 | 7–140 KB |
+| panel time (`EpdUpd`) | 2.9 s | 1.7 s |
+| total | 3.6 s | 1.8 s |
+
+So: **bandwidth and CPU, mostly.** For a battery sign on wifi and a Raspberry
+Pi that would otherwise dither, pack, interlace and compress 1.84 MB every
+tick, that is a real win. It is **not** continuous or animated updates, and
+nothing here should be read as promising that — the panel's waveform has a
+floor of well over a second whatever the area.
+
+### The ghosting policy is not optional
+
+E-ink accumulates ghosting under partial updates, and this firmware does
+**nothing** about it. That is measured, not assumed: across eight accepted
+partial pushes and twelve rectangles the sign's own console showed `wfn: 2,
+inv: 0` into exactly one `UPD_FULL_AREA` per rectangle, every time, with no
+clearing refresh it was not asked for.
+
+Only a **full-screen** push asks for the inverse clearing waveform. So one is
+forced every N partials — default 10, the vendor's own `noFullUpdateMax` — and
+that forced push is the only thing cleaning the glass. A sign left on partials
+forever slowly turns to mush.
+
+Note *asks*. The same measurements caught this firmware granting the requested
+clearing refresh on some full pushes and silently declining it on others, with
+byte-identical headers and no explanation anyone has found. That is a reason to
+keep the budget conservative, not to raise it.
+
+`sensor.<sign>_partials_since_refresh` carries the counter, and its attributes
+carry the whole policy: `enabled`, `capable`, `max_consecutive_partials`,
+`refresh_due`, `last_frame_full` and `last_fallback_reason`. Watch it after you
+turn this on. The counter is persisted, because the budget belongs to the panel
+and not to this process.
+
+### Why your sign may not be on the list
+
+There is **no way to ask a sign** whether it takes a rectangle. The list comes
+from `DeviceState.accepts_screen_rectangles`, which is a record of an
+experiment on physical hardware — `HardwareNameID 8`, one sign, 17 pushes, 17
+acks — and not a capability anything advertises. A sign that has never reported
+its hardware id is not on it either, so if yours has never connected, wait for
+its first contact.
+
+That property is **not** `supports_rectangles`, which answers the different
+question "would the vendor's server ever send one" and is False for this
+hardware on purpose. Diagnostics reports both, side by side, because conflating
+them is the likely bug report.
+
+Two more things the integration does for you, both of which matter more than
+they sound:
+
+* **A refused push is rolled back.** A partial carries the unchanged partner
+  lane's pixels read out of the server's state image, so a state that claims
+  pixels the glass never drew poisons every later rectangle and the device's
+  echoed `DisplayStateCRC` can never agree again. A NACK restores the previous
+  state and the previous counter and forces the next push full screen.
+* **Turning it on does not reload the entry.** Reloading would close the
+  listener and drop the sign's TCP session, and this firmware re-dials on its
+  own schedule — which can be the best part of an hour.
+
 ---
 
 ## Actions
@@ -620,7 +718,8 @@ carry a long-lived access token in a header.
   hiding the guess. It is correct for this hardware.
 * Hardware revision 1.0.0 signs use interlacing mode 1, which the library
   raises `NotImplementedError` for. This integration will fail to encode for
-  one.
+  one, and cannot offer it partial updates either — there is no lane map for
+  that mode, so the screen-space geometry does not exist.
 * There is a faint dark band at the panel's internal boundaries, most visible
   with blue-noise dithering on smooth gradients. It is device-side and is
   present under the vendor stack too.
@@ -648,6 +747,30 @@ the Visionect Software Suite to this integration.
 | That checksum is byte-identical to the one the offline replay produced from the same file — the encoder is deterministic | pass |
 | Restart Home Assistant with the sign in sync **and holding its socket**: teardown completes in 8 s, port rebinds, **zero pushes**, `DisplayUpdateCount` unchanged at 6 | pass |
 | `ErrorCode` stays `no error` throughout | pass |
+
+#### Partial screen updates, on the same sign
+
+Enabled through the options flow on the live sign, with the ghosting budget
+temporarily set to 3 so the forced refresh could be watched, then restored to
+the default 10.
+
+| Test | Result |
+|---|---|
+| Enabling it through *Configure* applies **without reloading the entry** — same runtime object, listener still bound, sign never dropped its socket | pass |
+| A whole new dashboard comes back **full screen** with `fallback_reason: not-worth-it`, not as a pile of rectangles | pass |
+| A changed label goes out as **one 192×87 screen rectangle, 1 472 bytes on the wire** against 58 570 for the full frame, and draws in 1 689 ms against 2 916 | pass |
+| The sign's own console echoes every partial as `wfn: 2, inv: 0` into exactly one `UPD_FULL_AREA` — the firmware is never asked for, and never takes, a clearing refresh of its own | pass |
+| Every push acked, and the device's echoed `DisplayStateCRC` equals our `pushed_checksum` on every push that reached a heartbeat | pass |
+| At the threshold the next frame is promoted to full screen with `fallback_reason: ghosting-refresh-due`, two 2880×640 rectangles, `inv: 1`, and the counter resets to 0 | pass |
+| Photographed through the webcam either side of one partial: after eroding one-pixel camera jitter, **272 changed pixels, all inside the intended label** — nothing else on the glass moved | pass |
+| `ErrorCode` stays `no error`, zero NACKs, zero failed pushes throughout | pass |
+
+One thing the run reproduced and did not explain: a forced full-screen push
+*requests* the inverse clearing refresh (`inv: 1` in the header) and the
+firmware granted it on some pushes and declined it on others, running
+`UPD_FULL_AREA` instead of `UPD_FULL` with byte-identical headers. That is
+`OPEN-QUESTIONS.md` A12's open question, seen again here, and it is why the
+default budget stays at the vendor's conservative 10.
 
 ### Also verified against hardware-faithful traffic
 

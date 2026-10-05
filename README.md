@@ -48,13 +48,87 @@ hour after `flash_save` if you would rather wait.
 
 ## What you get
 
-27 entities, created from the device's own status packet rather than a static
-list, so you do not get a screenful of permanently-unavailable sensors: battery,
+Entities created from the device's own status packet rather than a static list,
+so you do not get a screenful of permanently-unavailable sensors: battery,
 voltage, current, signal strength, temperature, uptime, last contact, next
 contact, display updates, filesystem free space, charging, connected, and more.
 Plus an `image` entity showing what is on the screen, buttons, dither/encoding
 selects, and 12 services — `display_image`, `display_text`, `set_content_source`,
 TCLV parameter read/write, device file listing and readback.
+
+## Partial screen updates
+
+**Off by default. Opt in per sign, under *Configure → Partial screen updates*.**
+
+Normally every push is the whole screen: 1.84 MB of pixels, ~78 KB on the wire,
+and 2.9–5.3 s on the glass. With partial updates on, a change to one corner of
+a dashboard goes out as one small rectangle instead — measured on the real sign
+at **1.5 KB against 58 KB**, drawing in **1.7 s against 2.9 s**.
+
+That is bandwidth and CPU. It is **not** continuous or animated updates, and
+nothing here promises that: the panel's waveform has a floor of well over a
+second whatever the area.
+
+Two things to know before you turn it on.
+
+**The ghosting policy is load-bearing.** Measured on the hardware, this firmware
+clears *nothing* by itself — across eight partial pushes it never once ran a
+clearing refresh of its own accord. Only a full-screen push asks for one. So the
+integration forces a full push every N partials (default 10, the vendor's own
+limit), and that forced push is the only thing cleaning the panel. Watch
+`sensor.<sign>_partials_since_refresh`; its attributes carry the whole policy.
+
+**Your sign may not be offered it.** There is no way to ask a sign whether it
+takes a rectangle. The list comes from hardware that was actually measured doing
+so, one physical sign at a time, so an unverified sign is simply not on it.
+
+## Development
+
+### Running the tests
+
+The suite runs against a **fake sign that replays verbatim captured traffic**
+from a real 31.2" panel, through the real listener on a real socket — not
+against mocks of the protocol.
+
+```sh
+uv venv --python 3.14 .venv
+uv pip install --python .venv/bin/python -r requirements_test.txt
+uv pip install --python .venv/bin/python -e ../pyvisionect  # not on PyPI yet
+
+.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m pytest tests/ --cov=custom_components.visionect --cov-report=term-missing
+```
+
+`pytest-homeassistant-custom-component` installs an exact Home Assistant
+version, so `requirements_test.txt` pins it: changing that pin re-tests a
+different core, which is the point of it being a pin.
+
+Run `pytest` from the repository root. Home Assistant finds a custom
+integration through the importable `custom_components` package, so the working
+directory is load-bearing.
+
+### Deploying, and keeping the copies honest
+
+There is more than one copy of this integration on the author's machine — the
+repository, the running Home Assistant, an archive — and they had already
+drifted. So copying is a script, and the script can also just look:
+
+```sh
+scripts/sync.sh --check                      # report drift, change nothing
+scripts/sync.sh ~/hass-test/config/custom_components/visionect
+scripts/sync.sh --library ../pyvisionect <dest>   # and the library beside it
+```
+
+Destinations can be listed one per line in `.sync-targets` (gitignored, since
+they are local paths) instead of being passed each time. `--library` also
+refreshes the hand-copied `pyvisionect` under the target's `deps/`, which is
+how that copy came to be missing a whole module.
+
+The script regenerates `translations/en.json` from `strings.json` before
+copying, because for a custom integration the one is a copy of the other and it
+had silently fallen six keys behind.
+
+Home Assistant caches integrations, so restart it after a sync.
 
 ## Status
 
