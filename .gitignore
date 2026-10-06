@@ -1,7 +1,9 @@
+
+.coverage
+deps/
+# local deployment targets for scripts/sync.sh
 __pycache__/
 *.py[cod]
-.venv/
-deps/
-
-# local deployment targets for scripts/sync.sh
+.pytest_cache/
 .sync-targets
+.venv/

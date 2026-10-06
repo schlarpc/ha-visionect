@@ -205,6 +205,29 @@ Working and verified against real hardware, but young. See
 [`OPEN-QUESTIONS.md`](https://github.com/schlarpc/pyvisionect/blob/main/OPEN-QUESTIONS.md)
 in the library for what is still unresolved.
 
+## Installing via HACS
+
+Add this repository as a **custom repository** (category: Integration), install,
+then restart Home Assistant and add **Visionect** from *Settings → Devices &
+Services*.
+
+> **No brand icon yet.** Home Assistant's icons and logos live in a separate
+> repository, [`home-assistant/brands`](https://github.com/home-assistant/brands),
+> not here — so until a `visionect` entry is accepted there, HACS and the
+> integrations page show a generic placeholder. Adding one means a PR to that
+> repo with a 256×256 and 512×512 `icon.png` (and optionally `logo.png`),
+> which needs artwork rather than code. The HACS validation workflow passes
+> `ignore: brands` for this reason; drop that line once the entry lands.
+
+### Version support
+
+`hacs.json` declares a floor of **2025.1.0**, but the only version this has
+actually been exercised against is **2026.9.4**. The panel needs
+`async_register_static_paths` (`hass.http.register_static_path` was removed in
+2026.9), and the service-target helpers moved to `homeassistant.helpers.target`
+recently — that import is guarded both ways, but older releases are untested
+rather than known-good. Treat anything below 2026.9 as unverified.
+
 ## Licence
 
 MIT.
