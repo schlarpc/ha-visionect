@@ -198,8 +198,8 @@ def test_the_prefilled_address_comes_from_where_the_listener_bound() -> None:
     committing it with ``flash_save`` leaves the cable as the only way back, so
     the address the integration resolved for itself wins.
     """
-    config = async_panel_config(_Runtime("10.42.0.50:11113", "0.0.0.0", 11113))
-    assert config["listener_host"] == "10.42.0.50"
+    config = async_panel_config(_Runtime("192.0.2.50:11113", "0.0.0.0", 11113))
+    assert config["listener_host"] == "192.0.2.50"
     assert config["listener_port"] == 11113
     assert config["configured_host"] == "0.0.0.0"
 

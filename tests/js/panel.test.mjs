@@ -580,10 +580,10 @@ describe("checkServerHost", () => {
 describe("suggestServer", () => {
   it("prefers what the listener actually bound to", () => {
     const got = suggestServer({
-      listener: { host: "10.42.0.50", port: 11113 },
+      listener: { host: "192.0.2.50", port: 11113 },
       location: { hostname: "ha.example.com" },
     });
-    assert.deepEqual(got, { host: "10.42.0.50", port: 11113, source: "listener", warning: null });
+    assert.deepEqual(got, { host: "192.0.2.50", port: 11113, source: "listener", warning: null });
   });
 
   it("suggests nothing and explains when the page is on localhost", () => {
@@ -638,7 +638,7 @@ describe("identify", () => {
     const transport = new FakeTransport();
     const console_ = consoleOn(transport);
     const info = await identify(console_);
-    assert.equal(info.uuid, "21002b00-0551-3730-3234-393600000000");
+    assert.equal(info.uuid, "00112233-4455-6677-8899-aabb00000000");
     assert.equal(info.firmware.version, "7.4.4407");
     assert.equal(info.firmware.hardware, "PP32 v1.1");
     assert.equal(info.firmware.app, "Joan");
@@ -689,9 +689,9 @@ describe("reply parsers", () => {
     // A 12-byte factory identifier zero-padded to 16: the trailing zeros are
     // the device's, not truncation.
     const uuid = parseUuid([
-      "UUID: 0x21 0x00 0x2b 0x00 0x05 0x51 0x37 0x30 0x32 0x34 0x39 0x36 0x00 0x00 0x00 0x00",
+      "UUID: 0x00 0x11 0x22 0x33 0x44 0x55 0x66 0x77 0x88 0x99 0xaa 0xbb 0x00 0x00 0x00 0x00",
     ]);
-    assert.equal(uuid, "21002b00-0551-3730-3234-393600000000");
+    assert.equal(uuid, "00112233-4455-6677-8899-aabb00000000");
   });
 
   it("reads server, wifi, connection and rssi off real frames", () => {
