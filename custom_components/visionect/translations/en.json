@@ -19,7 +19,7 @@
       },
       "reconfigure": {
         "title": "Move the listener",
-        "description": "The listener is on port **{port}** now. Changing it here keeps every sign's content source, dither choice and ghosting budget -- deleting the entry and adding it again does not.\n\nHome Assistant looks reachable at **{detected_ip}**.\n\n**The sign will not follow you.** It holds one server address and dials only that. Change the port here and the sign keeps calling the old one until you set it over USB as well:\n\n```\nserver_tcp_set {detected_ip} <new port>\nflash_save\ncs 1\ncs 3\n```\n\nWhich is the argument for pointing the sign at a *hostname* you control once, and moving the name instead.",
+        "description": "The listener is on port **{port}** now. Changing it here keeps every sign's content source, dither choice and ghosting budget -- deleting the entry and adding it again does not.\n\nHome Assistant looks reachable at **{detected_ip}**.\n\n**The sign will not follow you.** It holds one server address and dials only that. Change the port here and the sign keeps calling the old one until you set it over USB as well:\n\n```\nserver_tcp_set {detected_ip} NEW_PORT\nflash_save\ncs 1\ncs 3\n```\n\nWhich is the argument for pointing the sign at a *hostname* you control once, and moving the name instead.",
         "data": {
           "port": "Port",
           "host": "Bind address"
@@ -312,7 +312,7 @@
         },
         "headers": {
           "name": "Headers",
-          "description": "Outgoing HTTP headers, which is how you authenticate a renderer, e.g. Authorization: Bearer <token>."
+          "description": "Outgoing HTTP headers, which is how you authenticate a renderer, e.g. Authorization: Bearer TOKEN."
         }
       }
     },
