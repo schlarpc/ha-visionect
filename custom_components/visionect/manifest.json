@@ -23,8 +23,8 @@
   ],
   "quality_scale": "custom",
   "requirements": [
-    "pyvisionect[imaging]>=0.1.0"
+    "pyvisionect[imaging]>=0.1.1"
   ],
   "single_config_entry": true,
-  "version": "0.1.1"
+  "version": "0.1.2"
 }
