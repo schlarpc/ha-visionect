@@ -1,17 +1,30 @@
 {
   "domain": "visionect",
   "name": "Visionect e-ink signs",
-  "codeowners": ["@schlarpc"],
+  "codeowners": [
+    "@schlarpc"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "network"],
-  "after_dependencies": ["camera", "image", "panel_custom"],
+  "dependencies": [
+    "http",
+    "network"
+  ],
+  "after_dependencies": [
+    "camera",
+    "image",
+    "panel_custom"
+  ],
   "documentation": "https://github.com/schlarpc/ha-visionect",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/schlarpc/ha-visionect/issues",
-  "loggers": ["pyvisionect"],
+  "loggers": [
+    "pyvisionect"
+  ],
   "quality_scale": "custom",
-  "requirements": ["xxhash>=3.0"],
+  "requirements": [
+    "pyvisionect[imaging]>=0.1.0"
+  ],
   "single_config_entry": true,
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
