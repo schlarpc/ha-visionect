@@ -8,8 +8,6 @@
 
 display_image:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
   fields:
@@ -40,8 +38,6 @@ display_image:
 
 display_text:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
   fields:
@@ -66,8 +62,6 @@ display_text:
 
 set_content_source:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
   fields:
@@ -89,43 +83,31 @@ set_content_source:
 
 clear_content:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
 
 update_now:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
 
 refresh:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
 
 clear_screen:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
 
 ghost_clear:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
 
 read_parameters:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
   fields:
@@ -137,8 +119,6 @@ read_parameters:
 
 write_parameters:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
   fields:
@@ -153,15 +133,11 @@ write_parameters:
 
 list_device_files:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
 
 read_device_file:
   target:
-    device:
-      integration: visionect
     entity:
       integration: visionect
   fields:

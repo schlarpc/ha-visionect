@@ -352,7 +352,7 @@
       "fields": {
         "values": {
           "name": "Values",
-          "description": "A mapping of TCLV id to integer, e.g. {\"29\": 30}."
+          "description": "A mapping of TCLV id to integer value, given as YAML, for example a key of 29 with a value of 30."
         },
         "persist": {
           "name": "Persist",

@@ -1,6 +1,11 @@
 {
   "domain": "visionect",
   "name": "Visionect e-ink signs",
+  "after_dependencies": [
+    "camera",
+    "image",
+    "panel_custom"
+  ],
   "codeowners": [
     "@schlarpc"
   ],
@@ -8,11 +13,6 @@
   "dependencies": [
     "http",
     "network"
-  ],
-  "after_dependencies": [
-    "camera",
-    "image",
-    "panel_custom"
   ],
   "documentation": "https://github.com/schlarpc/ha-visionect",
   "integration_type": "hub",
